@@ -15,6 +15,7 @@ import type {
 } from '../types/jmap.js';
 import { JMAPError } from '../errors.js';
 import { TokenRefresher, createTokenRefresher } from '../auth/token-refresh.js';
+import { CommandTokenProvider } from '../auth/token-command.js';
 
 /** Extracted session data from JMAP session response */
 export interface JMAPSession {
@@ -41,12 +42,16 @@ export class JMAPClient {
   private readonly logger: Logger;
   private readonly stateTracker: Map<string, string> = new Map();
   private readonly tokenRefresher: TokenRefresher | null = null;
+  private readonly commandTokens: CommandTokenProvider | null = null;
 
   constructor(config: Config, logger: Logger) {
     this.config = config;
     this.logger = logger;
 
     // Initialize TokenRefresher for OIDC authentication
+    if (config.JMAP_AUTH_METHOD === 'command' && config.JMAP_TOKEN_COMMAND) {
+      this.commandTokens = new CommandTokenProvider(config.JMAP_TOKEN_COMMAND);
+    }
     if (config.JMAP_AUTH_METHOD === 'oidc' && config.JMAP_OIDC_ISSUER && config.JMAP_OIDC_CLIENT_ID) {
       this.tokenRefresher = createTokenRefresher(config.JMAP_OIDC_ISSUER, config.JMAP_OIDC_CLIENT_ID);
     }
@@ -66,6 +71,15 @@ export class JMAPClient {
       const credentials = `${this.config.JMAP_USERNAME}:${this.config.JMAP_PASSWORD}`;
       const token = Buffer.from(credentials).toString('base64');
       headers['Authorization'] = `Basic ${token}`;
+    } else if (this.config.JMAP_AUTH_METHOD === 'command') {
+      if (!this.commandTokens) {
+        throw new JMAPError(
+          'Command auth configuration incomplete',
+          'commandConfigError',
+          'Ensure JMAP_TOKEN_COMMAND is configured.'
+        );
+      }
+      headers['Authorization'] = 'Bearer ' + (await this.commandTokens.getToken());
     } else if (this.config.JMAP_AUTH_METHOD === 'oidc') {
       // OIDC: use TokenRefresher to get valid token (auto-refreshes if needed)
       if (!this.tokenRefresher) {

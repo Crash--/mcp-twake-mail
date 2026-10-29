@@ -16,10 +16,12 @@ export const envSchema = z
         },
         { message: 'URL must use HTTPS. Only localhost allowed over HTTP for development.' }
       ),
-    JMAP_AUTH_METHOD: z.enum(['basic', 'bearer', 'oidc']).default('basic'),
+    JMAP_AUTH_METHOD: z.enum(['basic', 'bearer', 'oidc', 'command']).default('basic'),
     JMAP_USERNAME: z.string().optional(),
     JMAP_PASSWORD: z.string().optional(),
     JMAP_TOKEN: z.string().optional(),
+    // command auth: shell command printing an access token (raw or JSON {access_token, expires_at})
+    JMAP_TOKEN_COMMAND: z.string().optional(),
     // OIDC configuration fields
     JMAP_OIDC_ISSUER: z
       .string()
@@ -80,6 +82,14 @@ export const envSchema = z
         });
       }
       // Note: JMAP_TOKEN is NOT required for OIDC - tokens come from the OAuth flow
+    } else if (data.JMAP_AUTH_METHOD === 'command') {
+      if (!data.JMAP_TOKEN_COMMAND) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['JMAP_TOKEN_COMMAND'],
+          message: 'JMAP_TOKEN_COMMAND is required when using command auth',
+        });
+      }
     }
   });
 
