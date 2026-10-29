@@ -44,7 +44,7 @@ export function registerAllTools(
   registerMailboxTools(server, jmapClient, logger);
 
   // Register email operation tools (mark_as_read, mark_as_unread, delete_email)
-  registerEmailOperationTools(server, jmapClient, logger);
+  registerEmailOperationTools(server, jmapClient, logger, emailSendingOptions?.signatureContent);
 
   // Register email sending tools (send_email, reply_email) with signature and defaultFrom
   registerEmailSendingTools(server, jmapClient, logger, emailSendingOptions);

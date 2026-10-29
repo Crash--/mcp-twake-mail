@@ -2,7 +2,7 @@ import { marked } from 'marked';
 
 // Configure marked for email-safe output (module-level, runs once)
 marked.setOptions({
-  gfm: false,       // Disable GitHub Flavored Markdown
+  gfm: true,        // Required by marked for 'breaks' to take effect
   breaks: true,     // Convert \n to <br> for email readability
 });
 
@@ -13,6 +13,8 @@ export function markdownToHtml(markdown: string): string {
 export function markdownToPlainText(markdown: string): string {
   // Strip markdown formatting for plain text emails
   return markdown
+    .replace(/<br\s*\/?>/gi, '\n')          // Inline HTML line breaks
+    .replace(/<[^>]+>/g, '')                // Strip inline HTML tags (styled spans)
     .replace(/^#{1,6}\s+/gm, '')            // Remove heading markers
     .replace(/\*\*(.+?)\*\*/g, '$1')        // Remove bold **text**
     .replace(/\*(.+?)\*/g, '$1')            // Remove italic *text*

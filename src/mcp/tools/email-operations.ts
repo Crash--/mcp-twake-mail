@@ -9,6 +9,8 @@ import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import type { JMAPClient } from '../../jmap/client.js';
 import type { Logger } from '../../config/logger.js';
 import type { EmailSetResponse, Identity, EmailSubmissionSetResponse } from '../../types/jmap.js';
+import type { SignatureContent } from '../../signature/index.js';
+import { buildDraftBody } from './draft-body.js';
 
 /**
  * Common annotations for non-destructive write operations.
@@ -68,7 +70,8 @@ const SUBMISSION_USING = [
 export function registerEmailOperationTools(
   server: McpServer,
   jmapClient: JMAPClient,
-  logger: Logger
+  logger: Logger,
+  signatureContent?: SignatureContent
 ): void {
   // mark_as_read - set $seen keyword (EMAIL-06)
   server.registerTool(
@@ -743,19 +746,27 @@ export function registerEmailOperationTools(
     'create_draft',
     {
       title: 'Create Draft Email',
-      description: 'Create a new draft email in the Drafts mailbox for later editing or sending.',
+      description:
+        'Create a new draft email in the Drafts mailbox for later editing or sending. ' +
+        'The draft is multipart (text + HTML): pass htmlBody for rich formatting, otherwise HTML is generated from body. ' +
+        'The configured signature is appended automatically (set signature=false to omit it): do not add it yourself.',
       inputSchema: {
         to: z.array(z.string().email()).optional().describe('Recipient email addresses'),
         cc: z.array(z.string().email()).optional().describe('CC email addresses'),
         bcc: z.array(z.string().email()).optional().describe('BCC email addresses'),
         subject: z.string().optional().describe('Email subject'),
-        body: z.string().optional().describe('Plain text email body'),
-        inReplyTo: z.string().optional().describe('Message-ID of the email being replied to'),
+        body: z.string().optional().describe('Plain text email body (without signature)'),
+        htmlBody: z.string().optional().describe('HTML email body fragment (without signature, no <html>/<body> wrapper)'),
+        signature: z.boolean().optional().describe('Append the configured signature (default true)'),
+        inReplyTo: z.string().optional().describe('Message-ID of the email being replied to (with or without angle brackets)'),
       },
       annotations: EMAIL_CREATE_ANNOTATIONS,
     },
-    async ({ to, cc, bcc, subject, body, inReplyTo }) => {
-      logger.debug({ to, cc, bcc, subject, hasBody: !!body, inReplyTo }, 'create_draft called');
+    async ({ to, cc, bcc, subject, body, htmlBody, signature, inReplyTo }) => {
+      logger.debug(
+        { to, cc, bcc, subject, hasBody: !!body, hasHtmlBody: !!htmlBody, signature, inReplyTo },
+        'create_draft called'
+      );
 
       try {
         const session = jmapClient.getSession();
@@ -827,17 +838,12 @@ export function registerEmailOperationTools(
           mailboxIds: { [draftsMailboxId]: true },
           keywords: { '$draft': true, '$seen': true },
           subject: subject || '',
-          textBody: [
-            {
-              partId: '1',
-              type: 'text/plain',
-            },
-          ],
-          bodyValues: {
-            '1': {
-              value: body || '',
-            },
-          },
+          ...buildDraftBody({
+            body,
+            htmlBody,
+            signature: signatureContent,
+            includeSignature: signature !== false,
+          }),
         };
 
         // Set from field using identity (if available)
@@ -856,7 +862,9 @@ export function registerEmailOperationTools(
           emailCreate.bcc = bcc.map((email) => ({ email }));
         }
         if (inReplyTo) {
-          emailCreate.inReplyTo = [inReplyTo];
+          const msgId = inReplyTo.trim().replace(/^<|>$/g, '');
+          emailCreate.inReplyTo = [msgId];
+          emailCreate.references = [msgId];
         }
 
         // Create the draft
