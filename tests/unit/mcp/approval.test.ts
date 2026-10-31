@@ -2,7 +2,10 @@
  * Prior approval of every write: each write tool asks the user (MCP elicitation) with the exact
  * action, and sends or changes nothing unless the user accepts.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -63,6 +66,7 @@ function fakeJmap() {
     getSession: () => ({ accountId: 'acc', apiUrl: 'https://jmap.example.com/api', username: 'alice.martin@example.com' }),
     request,
     parseMethodResponse: (r: [string, Record<string, unknown>]) => (r[0] === 'error' ? { success: false, error: { type: String(r[1].type) } } : { success: true, data: r[1] }),
+    downloadBlob: async (blobId: string) => new ArrayBuffer(blobId === 'small' ? 10 : 800 * 1024),
   } as unknown as JMAPClient;
   return { jmap, writes };
 }
@@ -119,7 +123,55 @@ describe('prior approval of writes', () => {
     const { client } = await connect('accept');
     const tools = (await client.listTools()).tools;
     const writers = tools.filter((t) => t.annotations?.readOnlyHint !== true).map((t) => t.name);
-    expect([...new Set(WRITES.map(([n]) => n))].sort()).toEqual(writers.sort());
+    expect([...new Set([...WRITES.map(([n]) => n), 'download_attachment'])].sort()).toEqual(writers.sort());
+  });
+
+  describe('download_attachment', () => {
+    const previousHome = process.env.HOME;
+    let home: string;
+    const saved = () => join(home, 'Downloads', 'a.pdf');
+
+    beforeEach(() => {
+      home = mkdtempSync(join(tmpdir(), 'approval-test-'));
+      process.env.HOME = home;
+    });
+
+    afterEach(() => {
+      process.env.HOME = previousHome;
+      rmSync(home, { recursive: true, force: true });
+    });
+
+    it('saves a large file only after the user accepts', async () => {
+      const ok = await connect('accept');
+      const r = await ok.call('download_attachment', { blobId: 'b', name: 'a.pdf' });
+      expect(r.error, r.text).toBe(false);
+      expect(ok.prompts).toHaveLength(1);
+      expect(ok.prompts[0]).toContain('Enregistrer une pièce jointe');
+      expect(ok.prompts[0]).toContain('a.pdf');
+      expect(existsSync(saved())).toBe(true);
+    });
+
+    it.each(['decline', 'cancel'] as const)('writes nothing on %s', async (answer) => {
+      const no = await connect(answer);
+      const r = await no.call('download_attachment', { blobId: 'b', name: 'a.pdf' });
+      expect(r.text).toMatch(/^Not done: .*nothing was sent or changed/);
+      expect(existsSync(join(home, 'Downloads'))).toBe(false);
+    });
+
+    it('writes nothing when the client cannot ask', async () => {
+      const t = await connect('accept', { elicitation: false });
+      const r = await t.call('download_attachment', { blobId: 'b', name: 'a.pdf' });
+      expect(r.text).toMatch(/^Not done: /);
+      expect(existsSync(join(home, 'Downloads'))).toBe(false);
+    });
+
+    it('does not ask for a small file returned inline', async () => {
+      const t = await connect('decline');
+      const r = await t.call('download_attachment', { blobId: 'small', name: 'a.pdf' });
+      expect(r.error, r.text).toBe(false);
+      expect(t.prompts).toEqual([]);
+      expect(existsSync(join(home, 'Downloads'))).toBe(false);
+    });
   });
 
   it.each(WRITES)('%s acts only after the user accepts (%o)', async (tool, args) => {

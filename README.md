@@ -57,7 +57,7 @@ Used together, they let one assistant prepare a meeting from the invitation, the
 
 ⚠️ = sends mail on your behalf or deletes data. Every tool carries MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`).
 
-**Every write is approved by you first.** Before a tool sends, drafts, marks, moves, labels or deletes anything, the server itself shows you the exact action through MCP elicitation (see [Prior approval](#prior-approval)) and acts only on your explicit OK. Reading e-mails, threads and attachments needs no approval.
+**Every write is approved by you first.** Before a tool sends, drafts, marks, moves, labels, deletes or saves anything, the server itself shows you the exact action through MCP elicitation (see [Prior approval](#prior-approval)) and acts only on your explicit OK. Reading e-mails, threads and attachments needs no approval.
 
 ### Highlights
 

@@ -4,12 +4,14 @@
  */
 import { z } from 'zod';
 import { writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
+import { randomUUID } from 'crypto';
+import { basename, extname, join } from 'path';
 import { homedir } from 'os';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import type { JMAPClient } from '../../jmap/client.js';
 import type { Logger } from '../../config/logger.js';
+import { approverFor } from '../approval.js';
 
 /** Maximum size for inline base64 response (750KB to stay under 1MB limit with overhead) */
 const MAX_INLINE_SIZE = 750 * 1024;
@@ -46,6 +48,49 @@ const ATTACHMENT_READ_ANNOTATIONS: ToolAnnotations = {
   idempotentHint: true,
   openWorldHint: true,
 };
+
+/**
+ * download_attachment writes to the disk for large files, after the user's approval.
+ */
+const ATTACHMENT_DOWNLOAD_ANNOTATIONS: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: true,
+};
+
+/**
+ * File name for an attachment: its last path segment, without control or
+ * direction-changing characters. Zero-width joiners stay: Persian words and
+ * emoji sequences need them, and they only join the characters around them.
+ * @returns The name, or null if nothing usable remains
+ */
+function toFilename(name: string | undefined): string | null {
+  if (!name) {
+    return 'attachment';
+  }
+  const filename = basename(name.replace(/(?!\p{Join_Control})[\p{Cc}\p{Cf}]/gu, '_')).trim();
+  return filename === '' || filename === '.' || filename === '..' ? null : filename;
+}
+
+/**
+ * Write a new private file in dir, under a unique name if this one is taken.
+ * The wx flag also refuses to follow a symbolic link left at that path.
+ * @returns The path written
+ */
+async function writeNewFile(dir: string, filename: string, data: Buffer): Promise<string> {
+  const path = join(dir, filename);
+  try {
+    await writeFile(path, data, { flag: 'wx', mode: 0o600 });
+    return path;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  const extension = extname(filename);
+  const uniquePath = join(dir, `${basename(filename, extension)}-${randomUUID()}${extension}`);
+  await writeFile(uniquePath, data, { flag: 'wx', mode: 0o600 });
+  return uniquePath;
+}
 
 /**
  * Determine if an attachment is inline based on RFC 8621 algorithm.
@@ -227,18 +272,29 @@ export function registerAttachmentTools(
         blobId: z.string().describe('The blob ID of the attachment to download (from get_attachments)'),
         name: z.string().optional().describe('Filename for the attachment'),
         type: z.string().optional().describe('MIME type of the attachment'),
-        saveToPath: z.string().optional().describe('Force save to this specific path (overrides automatic behavior)'),
       },
-      annotations: ATTACHMENT_READ_ANNOTATIONS,
+      annotations: ATTACHMENT_DOWNLOAD_ANNOTATIONS,
     },
-    async ({ blobId, name, type, saveToPath }) => {
-      logger.debug({ blobId, name, type, saveToPath }, 'download_attachment called');
+    async ({ blobId, name, type }) => {
+      logger.debug({ blobId, name, type }, 'download_attachment called');
 
       try {
+        const filename = toFilename(name);
+        if (filename === null) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text' as const,
+                text: `Invalid attachment name: ${name}`,
+              },
+            ],
+          };
+        }
+
         // Download the blob
-        const data = await jmapClient.downloadBlob(blobId, name, type);
+        const data = await jmapClient.downloadBlob(blobId, filename, type);
         const buffer = Buffer.from(data);
-        const filename = name || 'attachment';
 
         logger.debug(
           { blobId, size: data.byteLength, maxInline: MAX_INLINE_SIZE },
@@ -246,21 +302,16 @@ export function registerAttachmentTools(
         );
 
         // Decide whether to return inline or save to disk
-        const shouldSaveToDisk = saveToPath || data.byteLength > MAX_INLINE_SIZE;
+        if (data.byteLength > MAX_INLINE_SIZE) {
+          const refused = await approverFor(server).gate('download_attachment', () => ({
+            action: 'download_attachment',
+            details: [['attachments', filename]],
+          }));
+          if (refused) return refused;
 
-        if (shouldSaveToDisk) {
-          // Save to disk
-          let outputPath: string;
-          if (saveToPath) {
-            outputPath = saveToPath;
-          } else {
-            // Default to ~/Downloads
-            const downloadDir = join(homedir(), 'Downloads');
-            await mkdir(downloadDir, { recursive: true });
-            outputPath = join(downloadDir, filename);
-          }
-
-          await writeFile(outputPath, buffer);
+          const downloadDir = join(homedir(), 'Downloads');
+          await mkdir(downloadDir, { recursive: true });
+          const outputPath = await writeNewFile(downloadDir, filename, buffer);
 
           logger.debug(
             { blobId, size: data.byteLength, path: outputPath },
