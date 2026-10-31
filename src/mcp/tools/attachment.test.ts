@@ -1,7 +1,18 @@
 /**
  * Tests for attachment MCP tool - get_attachments.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'fs';
+import { tmpdir } from 'os';
+import { basename, join } from 'path';
 import { registerAttachmentTools, isInlineAttachment } from './attachment.js';
 import type { JMAPClient } from '../../jmap/client.js';
 import type { Logger } from '../../config/logger.js';
@@ -68,6 +79,7 @@ describe('registerAttachmentTools', () => {
       getSession: vi.fn(() => ({ accountId: 'account-1', apiUrl: 'https://jmap.example.com/api' })),
       request: vi.fn(),
       parseMethodResponse: vi.fn(),
+      downloadBlob: vi.fn(),
     } as unknown as JMAPClient;
 
     // Mock logger (silent)
@@ -498,6 +510,121 @@ describe('registerAttachmentTools', () => {
       expect(parsed.total).toBe(3);
       expect(parsed.filtered).toBe(1); // Only non-inline image
       expect(parsed.attachments[0].name).toBe('attached-photo.jpg');
+    });
+  });
+
+  describe('download_attachment', () => {
+    const previousHome = process.env.HOME;
+    const size = 800 * 1024;
+    let home: string;
+
+    const download = async (args: Record<string, unknown>) =>
+      registeredTools.get('download_attachment')!({ blobId: 'blob-1', ...args });
+    const savedTo = async (args: Record<string, unknown>): Promise<string> =>
+      JSON.parse((await download(args)).content[0].text).savedTo;
+
+    beforeEach(() => {
+      home = mkdtempSync(join(tmpdir(), 'attachment-test-'));
+      process.env.HOME = home;
+      vi.mocked(mockJmapClient.downloadBlob).mockImplementation(async () => new ArrayBuffer(size));
+    });
+
+    afterEach(() => {
+      process.env.HOME = previousHome;
+      rmSync(home, { recursive: true, force: true });
+    });
+
+    it('returns a small blob inline', async () => {
+      vi.mocked(mockJmapClient.downloadBlob).mockResolvedValue(new TextEncoder().encode('hello').buffer as ArrayBuffer);
+
+      const result = await download({});
+
+      expect(mockJmapClient.downloadBlob).toHaveBeenCalledWith('blob-1', 'attachment', undefined);
+      expect(JSON.parse(result.content[0].text).data).toBe(Buffer.from('hello').toString('base64'));
+      expect(existsSync(join(home, 'Downloads'))).toBe(false);
+    });
+
+    it('keeps the file in ~/Downloads whatever the name', async () => {
+      expect(await savedTo({ name: '../outside/file.bin' })).toBe(join(home, 'Downloads', 'file.bin'));
+      expect(existsSync(join(home, 'outside'))).toBe(false);
+    });
+
+    it('ignores an absolute name', async () => {
+      expect(await savedTo({ name: join(home, 'outside.bin') })).toBe(join(home, 'Downloads', 'outside.bin'));
+      expect(existsSync(join(home, 'outside.bin'))).toBe(false);
+    });
+
+    it('ignores a path given by the caller', async () => {
+      const target = join(home, 'target.bin');
+
+      expect(await savedTo({ name: 'a.bin', saveToPath: target })).toBe(join(home, 'Downloads', 'a.bin'));
+      expect(existsSync(target)).toBe(false);
+    });
+
+    it('does not overwrite an existing file', async () => {
+      const first = await savedTo({ name: 'a.pdf' });
+      writeFileSync(first, 'mine');
+
+      const second = await savedTo({ name: 'a.pdf' });
+
+      expect(readFileSync(first, 'utf8')).toBe('mine');
+      expect(basename(second)).toMatch(/^a-.+\.pdf$/);
+      expect(statSync(second).size).toBe(size);
+    });
+
+    it('does not write through a symbolic link', async () => {
+      const target = join(home, 'target');
+      writeFileSync(target, 'mine');
+      await savedTo({ name: 'first.bin' });
+      symlinkSync(target, join(home, 'Downloads', 'link'));
+
+      await savedTo({ name: 'link' });
+
+      expect(readFileSync(target, 'utf8')).toBe('mine');
+    });
+
+    it('writes private files', async () => {
+      const first = await savedTo({ name: 'a.bin' });
+      const second = await savedTo({ name: 'a.bin' });
+
+      expect(statSync(first).mode & 0o777).toBe(0o600);
+      expect(statSync(second).mode & 0o777).toBe(0o600);
+    });
+
+    it.each([
+      ['a\nb.txt', 'a_b.txt'],
+      [`a${String.fromCodePoint(0x202e)}b.txt`, 'a_b.txt'],
+    ])('replaces control and direction characters in %j', async (name, expected) => {
+      expect(await savedTo({ name })).toBe(join(home, 'Downloads', expected));
+    });
+
+    it.each([
+      `a${String.fromCodePoint(0x200c)}b.txt`,
+      `a${String.fromCodePoint(0x200d)}b.txt`,
+    ])('keeps the joiner in %j', async (name) => {
+      expect(await savedTo({ name })).toBe(join(home, 'Downloads', name));
+    });
+
+    it('falls back on a default for an empty name', async () => {
+      expect(await savedTo({ name: '' })).toBe(join(home, 'Downloads', 'attachment'));
+    });
+
+    it.each([' ', '.', '..', '../..', '/', 'a/..'])('refuses the name %j', async (name) => {
+      const result = await download({ name });
+
+      expect(result.isError).toBe(true);
+      expect(mockJmapClient.downloadBlob).not.toHaveBeenCalled();
+    });
+
+    it('declares that it writes', () => {
+      const calls = vi.mocked(mockServer.registerTool).mock.calls as unknown as Array<
+        [string, { annotations: Record<string, boolean>; inputSchema: object }]
+      >;
+      const config = calls.find(([name]) => name === 'download_attachment')![1];
+
+      expect(config.annotations.readOnlyHint).toBe(false);
+      expect(config.annotations.destructiveHint).toBe(false);
+      expect(config.inputSchema).not.toHaveProperty('saveToPath');
     });
   });
 

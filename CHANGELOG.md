@@ -4,6 +4,9 @@ All notable changes to mcp-twake-mail are documented here. The format follows [K
 
 ## [Unreleased]
 
+### Changed
+- `download_attachment` no longer takes `saveToPath`: large files always go to `~/Downloads`, under the last segment of their name, in mode 600, and an existing file is kept. The tool is annotated as writing.
+
 ## [2.1.0] - 2026-10-31
 
 ### Added
