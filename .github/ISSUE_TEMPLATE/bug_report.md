@@ -1,46 +1,36 @@
 ---
-name: Bug Report
-about: Report a bug to help us improve mcp-twake-mail
-title: ''
+name: Bug report
+about: Report a problem with mcp-twake-mail
+title: "[Bug] "
 labels: bug
-assignees: ''
 ---
 
-## Describe the bug
+<!-- Security vulnerability? Do not open a public issue: see SECURITY.md. -->
 
-A clear and concise description of what the bug is.
+## Description
+
+What happened, and what did you expect?
 
 ## Steps to reproduce
 
-1. Configure mcp-twake-mail with '...'
-2. Ask Claude '...'
-3. See error
-
-## Expected behavior
-
-What you expected to happen.
-
-## Actual behavior
-
-What actually happened. Include error messages if any.
-
-## Environment
-
-- **Node.js version:** (e.g., 22.x)
-- **OS:** (e.g., macOS 15, Ubuntu 24.04)
-- **JMAP server:** (e.g., Apache James, Cyrus IMAP)
-- **MCP client:** (e.g., Claude Desktop, Claude Code)
-- **mcp-twake-mail version:** (e.g., 0.1.0)
-- **Auth method:** (basic / bearer / oidc)
+1.
+2.
+3.
 
 ## Logs
 
-If applicable, set `LOG_LEVEL=debug` and include relevant log output (redact any credentials).
+Run with `LOG_LEVEL=debug` and paste the relevant stderr lines. **Remove any token, password, email address or hostname you do not want to make public.**
 
 ```
-Paste logs here
 ```
 
-## Additional context
+## Environment
 
-Any other context about the problem.
+<!-- Node.js version, OS, MCP client, JMAP server (e.g. Twake Mail / Apache James), authentication method -->
+
+- mcp-twake-mail version:
+- Node.js version:
+- OS:
+- MCP client (Claude Desktop, Claude Code, Hermes Agent, …):
+- Server:
+- Authentication method:
