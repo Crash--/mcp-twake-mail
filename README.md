@@ -11,7 +11,7 @@
 
 ## What is it?
 
-`mcp-twake-mail` is a [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server. MCP is the open standard that lets AI assistants (Claude Desktop, Claude Code, Hermes Agent, Cursor, VS Code and many others) use external tools. This server exposes your mailbox to the assistant as **29 tools**: read, search, write drafts, reply, organise, handle attachments.
+`mcp-twake-mail` is a [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server. MCP is the open standard that lets AI assistants (Claude Desktop, Claude Code, Hermes Agent, Cursor, VS Code and many others) use external tools. This server exposes your mailbox to the assistant as **30 tools**: read, search, write drafts, reply, organise, handle attachments.
 
 It speaks **JMAP** ([RFC 8620](https://www.rfc-editor.org/rfc/rfc8620) / [RFC 8621](https://www.rfc-editor.org/rfc/rfc8621)), the modern email standard used by Twake Mail and Apache James, so it also works with any JMAP server (Stalwart, Cyrus IMAP, Fastmail…).
 
@@ -41,11 +41,11 @@ Used together, they let one assistant prepare a meeting from the invitation, the
 
 ## Features
 
-### 29 MCP tools
+### 30 MCP tools
 
 | Category | Tools |
 |---|---|
-| Read | `list_emails`, `get_email`, `search_emails`, `get_thread` |
+| Read | `get_email`, `get_email_labels`, `search_emails`, `get_thread`, `get_thread_emails` |
 | Drafts | `create_draft`, `update_draft` |
 | Send ⚠️ | `send_email`, `reply_email`, `forward_email`, `send_draft` |
 | Organise | `mark_as_read`, `mark_as_unread`, `move_email`, `add_label`, `remove_label` |
